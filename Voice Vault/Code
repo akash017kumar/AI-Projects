@@ -1,0 +1,52 @@
+import boto3
+import logging
+from urllib.parse import unquote_plus
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+s3 = boto3.client('s3')
+polly = boto3.client('polly')
+
+INPUT_BUCKET = 'voice-vault-input-bucket'
+OUTPUT_BUCKET = 'voice-vault-output-bucket'
+
+def lambda_handler(event, context):
+    record = event['Records'][0]
+
+    bucket = record['s3']['bucket']['name']
+    key = unquote_plus(record['s3']['object']['key'])
+
+    logger.info(f"Processing file: {key}")
+
+    # Only process input bucket
+    if bucket != INPUT_BUCKET:
+        return {"status": "ignored"}
+
+    # Only process .txt files
+    if not key.lower().endswith('.txt'):
+        return {"status": "skipped"}
+
+    # Read text file
+    text_obj = s3.get_object(Bucket=bucket, Key=key)
+    text = text_obj['Body'].read().decode('utf-8')
+
+    # Convert text to speech
+    response = polly.synthesize_speech(
+        Text=text,
+        OutputFormat='mp3',
+        VoiceId='Matthew'
+    )
+
+    audio_key = key.replace('.txt', '.mp3')
+
+    # Save MP3 to output bucket
+    s3.put_object(
+        Bucket=OUTPUT_BUCKET,
+        Key=audio_key,
+        Body=response['AudioStream'].read(),
+        ContentType='audio/mpeg'
+    )
+
+    logger.info(f"Audio created: {audio_key}")
+    return {"status": "success"}
